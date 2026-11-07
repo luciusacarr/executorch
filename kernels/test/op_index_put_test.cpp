@@ -699,6 +699,49 @@ TEST_F(OpIndexPutOutTest, IndicesFewerThanInputDimSupportedSameValue) {
   run_test_cases(x, /*indices=*/indices, values, expected, expected_accum);
 }
 
+TEST_F(OpIndexPutOutTest, ValuesBroadcastNonScalar) {
+  TensorFactory<ScalarType::Double> tf;
+  TensorFactory<ScalarType::Long> tfl;
+
+  Tensor x = tf.ones({3, 2, 3});
+
+  // x[[2, 0]] has shape [2, 2, 3]; values [2, 1] broadcasts along the missing
+  // leading dim and the trailing size-1 dim.
+  optional<Tensor> indices[] = {optional<Tensor>(tfl.make({2}, {2, 0}))};
+
+  Tensor values = tf.make({2, 1}, {10., 20.});
+
+  // clang-format off
+  Tensor expected = tf.make(
+      {3, 2, 3},
+      {
+          10., 10., 10., // [0, 0, :]
+          20., 20., 20., // [0, 1, :]
+
+           1.,  1.,  1., // [1, 0, :]
+           1.,  1.,  1., // [1, 1, :]
+
+          10., 10., 10., // [2, 0, :]
+          20., 20., 20., // [2, 1, :]
+      });
+
+  Tensor expected_accum = tf.make(
+      {3, 2, 3},
+      {
+          11., 11., 11., // [0, 0, :]
+          21., 21., 21., // [0, 1, :]
+
+           1.,  1.,  1., // [1, 0, :]
+           1.,  1.,  1., // [1, 1, :]
+
+          11., 11., 11., // [2, 0, :]
+          21., 21., 21., // [2, 1, :]
+      });
+  // clang-format on
+
+  run_test_cases(x, /*indices=*/indices, values, expected, expected_accum);
+}
+
 //
 // Test that all dtypes are supported
 //

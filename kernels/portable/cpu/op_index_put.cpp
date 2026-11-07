@@ -123,32 +123,39 @@ Tensor& index_put_out(
     x_numel *= x_sizes[i];
   }
 
+  // If the last input dim is not indexed, it is also the last dim of x, so x
+  // can be processed one contiguous row at a time.
+  size_t inner = 1;
+  size_t val_inner_stride = 0;
+  if (dim_map[in.dim() - 1] >= 0) {
+    inner = x_sizes[x_dim - 1];
+    if (values.dim() > 0 && values.size(values.dim() - 1) != 1) {
+      val_inner_stride = values.strides()[values.dim() - 1];
+    }
+  }
+
   ET_SWITCH_REALHBBF16_TYPES(in_type, ctx, "index_put.out", CTYPE, [&]() {
     const CTYPE* const values_data = values.const_data_ptr<CTYPE>();
     CTYPE* const out_data = out.mutable_data_ptr<CTYPE>();
 
-    for (const auto x_ix : c10::irange(x_numel)) {
-      size_t in_ix = 0;
-
+    for (size_t x_ix = 0; x_ix < x_numel; x_ix += inner) {
       size_t x_coord[kTensorDimensionLimit];
       delinearize_index(x_ix, {x_sizes, x_dim}, x_coord, kTensorDimensionLimit);
 
       size_t in_coord[kTensorDimensionLimit];
-
       ET_KERNEL_CHECK(
           ctx,
           get_in_coord(
               in, indices, start, bc_ndim, dim_map, ix_map, x_coord, in_coord),
           InvalidArgument, );
-
-      in_ix = coordinateToIndex(in, in_coord);
-
-      // Braodcast values
-      size_t val_ix = linearize_access_indexes(x_coord, x_dim, values);
-      if (accumulate) {
-        out_data[in_ix] += values_data[val_ix];
-      } else {
-        out_data[in_ix] = values_data[val_ix];
+      const size_t in_ix = coordinateToIndex(in, in_coord);
+      const size_t val_ix = linearize_access_indexes(x_coord, x_dim, values);
+      for (const auto j : c10::irange(inner)) {
+        if (accumulate) {
+          out_data[in_ix + j] += values_data[val_ix + j * val_inner_stride];
+        } else {
+          out_data[in_ix + j] = values_data[val_ix + j * val_inner_stride];
+        }
       }
     }
   });
